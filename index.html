@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EMG Gesture Recorder</title>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
+
+    :root {
+      --bg:        #0a0c0f;
+      --panel:     #0f1318;
+      --border:    #1e2530;
+      --accent:    #00e5ff;
+      --green:     #00ff88;
+      --yellow:    #ffee00;
+      --red:       #ff3b5c;
+      --text:      #c8d8e8;
+      --dim:       #4a5a6a;
+      --font-mono: 'Share Tech Mono', monospace;
+      --font-ui:   'Rajdhani', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 16px 40px;
+      gap: 14px;
+    }
+
+    /* Subtle scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.08) 2px,
+        rgba(0,0,0,0.08) 4px
+      );
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    header h1 {
+      font-family: var(--font-mono);
+      font-size: 1rem;
+      letter-spacing: 0.15em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+
+    header p {
+      font-size: 0.75rem;
+      color: var(--dim);
+      letter-spacing: 0.08em;
+    }
+
+    /* ── Main grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: 640px 300px;
+      gap: 14px;
+      width: 100%;
+      max-width: 960px;
+    }
+
+    /* ── Camera panel ── */
+    #camera-panel {
+      position: relative;
+      width: 640px;
+      height: 480px;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+
+    #camera-panel::before {
+      content: 'CAMERA FEED';
+      position: absolute;
+      top: 8px; left: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--dim);
+      letter-spacing: 0.1em;
+      z-index: 2;
+    }
+
+    /* Recording flash overlay */
+    #rec-flash {
+      position: absolute;
+      inset: 0;
+      border: 3px solid var(--red);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 3;
+      transition: opacity 0.05s;
+    }
+
+    #rec-flash.active { opacity: 1; }
+
+    video  { display: none; }
+
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+
+    /* REC badge */
+    #rec-badge {
+      position: absolute;
+      top: 8px; right: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--red);
+      letter-spacing: 0.12em;
+      opacity: 0;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      z-index: 4;
+      transition: opacity 0.1s;
+    }
+
+    #rec-badge.active { opacity: 1; }
+
+    #rec-badge::before {
+      content: '';
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      animation: blink-dot 0.8s steps(1) infinite;
+    }
+
+    @keyframes blink-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+
+    /* ── Right sidebar ── */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* ── Generic panel ── */
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+    }
+
+    .panel-title {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      letter-spacing: 0.12em;
+      color: var(--dim);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    /* ── Gesture display ── */
+    #gesture-value {
+      font-family: var(--font-mono);
+      font-size: 1.8rem;
+      color: var(--accent);
+      min-height: 2.2rem;
+      transition: color 0.1s;
+    }
+
+    #gesture-value.detected { color: var(--green); }
+
+    /* ── EMG live values ── */
+    .emg-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 4px;
+    }
+
+    .emg-ch {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--dim);
+    }
+
+    .emg-val {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      color: var(--text);
+      transition: color 0.1s;
+    }
+
+    .emg-bar-wrap {
+      height: 3px;
+      background: var(--border);
+      margin-bottom: 8px;
+    }
+
+    .emg-bar {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.04s linear;
+    }
+
+    .emg-bar.ch2 { background: var(--green); }
+
+    /* ── BLE panel ── */
+    #ble-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--dim);
+      margin-right: 6px;
+      vertical-align: middle;
+      transition: background 0.2s;
+    }
+
+    #ble-dot.connected { background: var(--green); }
+
+    #ble-status-text {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      vertical-align: middle;
+    }
+
+    #btn-connect {
+      margin-top: 10px;
+      width: 100%;
+      background: transparent;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      padding: 8px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      text-transform: uppercase;
+    }
+
+    #btn-connect:hover  { background: var(--accent); color: #000; }
+    #btn-connect:disabled { border-color: var(--dim); color: var(--dim); cursor: default; }
+    #btn-connect:disabled:hover { background: transparent; color: var(--dim); }
+
+    /* ── Recording log ── */
+    #log {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--dim);
+      max-height: 130px;
+      overflow-y: auto;
+      line-height: 1.7;
+    }
+
+    #log .log-ok   { color: var(--green); }
+    #log .log-warn { color: var(--yellow); }
+    #log .log-err  { color: var(--red); }
+
+    /* ── EMG waveform canvas ── */
+    #wave-panel {
+      grid-column: 1 / -1;
+      width: 100%;
+      max-width: 960px;
+    }
+
+    #waveform {
+      width: 100%;
+      height: 120px;
+      display: block;
+    }
+
+    /* ── Stats bar ── */
+    #stats-bar {
+      grid-column: 1 / -1;
+      display: flex;
+      gap: 10px;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--dim);
+    }
+
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .stat span { color: var(--text); }
+
+    /* ── Instructions ── */
+    #instructions {
+      grid-column: 1 / -1;
+      font-size: 0.7rem;
+      color: var(--dim);
+      line-height: 1.8;
+      border-left: 2px solid var(--border);
+      padding-left: 12px;
+    }
+
+    #instructions strong { color: var(--text); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>EMG // Gesture Recorder</h1>
+    <p>AD8232 · ESP32 · BLE · MediaPipe</p>
+  </header>
+
+  <!-- ── Main grid ── -->
+  <div class="grid">
+
+    <!-- Camera feed -->
+    <div id="camera-panel">
+      <div id="rec-flash"></div>
+      <div id="rec-badge">REC</div>
+      <video id="input-video" playsinline></video>
+      <canvas id="output-canvas" width="640" height="480"></canvas>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+
+      <!-- Gesture -->
+      <div class="panel">
+        <div class="panel-title">Detected Gesture</div>
+        <div id="gesture-value">–</div>
+        <div id="gesture-name" style="font-size:0.75rem;color:var(--dim);margin-top:4px;">No gesture</div>
+      </div>
+
+      <!-- EMG live values -->
+      <div class="panel">
+        <div class="panel-title">Live EMG (raw ADC)</div>
+        <div class="emg-row">
+          <span class="emg-ch">CH1 (GPIO32)</span>
+          <span class="emg-val" id="val-emg1">–</span>
+        </div>
+        <div class="emg-bar-wrap"><div class="emg-bar" id="bar-emg1"></div></div>
+        <div class="emg-row">
+          <span class="emg-ch">CH2 (GPIO33)</span>
+          <span class="emg-val" id="val-emg2">–</span>
+        </div>
+        <div class="emg-bar-wrap"><div class="emg-bar ch2" id="bar-emg2"></div></div>
+      </div>
+
+      <!-- BLE -->
+      <div class="panel">
+        <div class="panel-title">BLE Connection</div>
+        <div>
+          <span id="ble-dot"></span>
+          <span id="ble-status-text">Not connected</span>
+        </div>
+        <button id="btn-connect">Connect ESP32-EMG</button>
+      </div>
+
+      <!-- Rest class -->
+      <div class="panel">
+        <div class="panel-title">Rest / No-Gesture Class</div>
+        <div style="font-size:0.7rem;color:var(--dim);margin-bottom:8px;line-height:1.5;">
+          Keep hand relaxed (or moving, not pinching), then press to save
+          the last <em>Pre-trigger</em> seconds as Gesture 3 (rest).
+        </div>
+        <button id="btn-rest" style="width:100%;background:transparent;border:1px solid var(--yellow);
+          color:var(--yellow);font-family:var(--font-mono);font-size:0.75rem;letter-spacing:0.08em;
+          padding:8px;cursor:pointer;text-transform:uppercase;">Record Rest (3s hold)</button>
+      </div>
+
+      <!-- Recording config -->
+      <div class="panel">
+        <div class="panel-title">Recording Config</div>
+        <div style="font-size:0.72rem;color:var(--dim);line-height:2;">
+          Pre-trigger <span style="color:var(--text)">
+            <input id="cfg-window" type="number" value="1" min="1" max="10"
+              style="width:36px;background:#0a0c0f;border:1px solid var(--border);color:var(--accent);
+                     font-family:var(--font-mono);font-size:0.75rem;text-align:center;padding:1px 3px;">
+            s</span><br>
+          Cooldown <span style="color:var(--text)">
+            <input id="cfg-cooldown" type="number" value="2" min="1" max="10"
+              style="width:36px;background:#0a0c0f;border:1px solid var(--border);color:var(--accent);
+                     font-family:var(--font-mono);font-size:0.75rem;text-align:center;padding:1px 3px;">
+            s</span><br>
+          Min confidence <span style="color:var(--text)">
+            <input id="cfg-conf" type="number" value="30" min="5" max="60"
+              style="width:36px;background:#0a0c0f;border:1px solid var(--border);color:var(--accent);
+                     font-family:var(--font-mono);font-size:0.75rem;text-align:center;padding:1px 3px;">
+            frames</span>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="panel" style="flex:1;">
+        <div class="panel-title">Recording Log</div>
+        <div id="log"><span class="log-warn">Waiting for BLE connection…</span></div>
+      </div>
+
+    </div><!-- /sidebar -->
+
+    <!-- Waveform -->
+    <div class="panel wave-panel" style="grid-column:1/-1;">
+      <div class="panel-title">EMG Waveform — CH1 <span style="color:var(--accent)">━</span>  CH2 <span style="color:var(--green)">━</span></div>
+      <canvas id="waveform"></canvas>
+    </div>
+
+    <!-- Stats -->
+    <div id="stats-bar">
+      <div class="stat">FILES SAVED <span id="stat-files">0</span></div>
+      <div class="stat">LAST GESTURE <span id="stat-last">–</span></div>
+      <div class="stat">SAMPLES/FILE <span id="stat-samples">–</span></div>
+      <div class="stat">BLE PACKETS/s <span id="stat-pps">0</span></div>
+    </div>
+
+    <!-- Instructions -->
+    <div id="instructions">
+      <strong>Gesture → Label mapping:</strong>
+      Gesture 0 = Thumb + Index &nbsp;|&nbsp;
+      Gesture 1 = Thumb + Middle &nbsp;|&nbsp;
+      Gesture 2 = Thumb + Ring &nbsp;|&nbsp;
+      Gesture 3 = Rest / No Gesture (manual)<br>
+      <strong>How it works:</strong>
+      EMG data streams continuously into a rolling cyclic buffer.
+      When MediaPipe holds a gesture for <em>Min confidence</em> frames, it instantly snapshots
+      the last <em>Pre-trigger</em> seconds from the buffer — capturing the muscle activation
+      that led up to the gesture. A <em>Cooldown</em> period then blocks re-triggering.
+      Rest samples are captured manually with the <em>Record Rest</em> button (press and hold 3s)
+      since there's no gesture to auto-trigger on — keep the hand relaxed, or move it without
+      pinching, while holding.
+    </div>
+
+  </div><!-- /grid -->
+
+  <!-- MediaPipe CDN (pinned) -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"
+    crossorigin="anonymous"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js"
+    crossorigin="anonymous"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"
+    crossorigin="anonymous"></script>
+
+  <script src="camera_test.js"></script>
+
+  <script>
+  // ===========================================================================
+  // CONFIG (overridden live from inputs)
+  // ===========================================================================
+  function cfg() {
+    return {
+      windowSec  : parseFloat(document.getElementById('cfg-window').value)   || 3,
+      cooldownSec: parseFloat(document.getElementById('cfg-cooldown').value)  || 2,
+      minFrames  : parseInt(document.getElementById('cfg-conf').value)        || 30,
+    };
+  }
+
+  // ===========================================================================
+  // BLE
+  // ===========================================================================
+  const SERVICE_UUID        = "12345678-1234-1234-1234-123456789abc";
+  const CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456";
+
+  const btnConnect      = document.getElementById('btn-connect');
+  const bleDot          = document.getElementById('ble-dot');
+  const bleStatusText   = document.getElementById('ble-status-text');
+
+  let bleConnected = false;
+
+  // Ring buffer for incoming EMG samples (kept in RAM, flushed on save)
+  const EMG_BUFFER_MAX = 5000;  // ~10s at 500Hz
+  let emgBuffer = [];           // [{ts, emg1, emg2}, …]
+
+  // Packet rate counter
+  let ppsCount = 0;
+  setInterval(() => {
+    document.getElementById('stat-pps').textContent = ppsCount;
+    ppsCount = 0;
+  }, 1000);
+
+  // Live value displays
+  const valEmg1 = document.getElementById('val-emg1');
+  const valEmg2 = document.getElementById('val-emg2');
+  const barEmg1 = document.getElementById('bar-emg1');
+  const barEmg2 = document.getElementById('bar-emg2');
+
+  function handleBLEData(event) {
+    ppsCount++;
+    const raw = new TextDecoder().decode(event.target.value).trim();
+    if (!raw) return;
+
+    const now = Date.now();
+    const lines = raw.split('|');
+
+    for (const line of lines) {
+      const parts = line.split(',');
+      if (parts.length < 2) continue;
+      const v1 = parseInt(parts[0]);
+      const v2 = parseInt(parts[1]);
+      if (isNaN(v1) || isNaN(v2)) continue;
+
+      emgBuffer.push({ ts: now, emg1: v1, emg2: v2 });
+      if (emgBuffer.length > EMG_BUFFER_MAX) emgBuffer.shift();
+
+      // Update live displays (last sample in packet)
+      valEmg1.textContent = v1;
+      valEmg2.textContent = v2;
+      barEmg1.style.width = (v1 / 4095 * 100).toFixed(1) + '%';
+      barEmg2.style.width = (v2 / 4095 * 100).toFixed(1) + '%';
+    }
+  }
+
+  async function connectBLE() {
+    if (!navigator.bluetooth) {
+      setStatus('ERROR: Web Bluetooth not supported.', false);
+      return;
+    }
+    setStatus('Scanning…', false);
+    btnConnect.disabled = true;
+
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [SERVICE_UUID] }],
+      });
+
+      device.addEventListener('gattserverdisconnected', () => {
+        bleConnected = false;
+        bleDot.className = '';
+        setStatus('Disconnected', false);
+        btnConnect.textContent = 'Connect ESP32-EMG';
+        btnConnect.disabled = false;
+        btnConnect.onclick = connectBLE;
+      });
+
+      const server  = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      const char    = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+      await char.startNotifications();
+      char.addEventListener('characteristicvaluechanged', handleBLEData);
+
+      bleConnected = true;
+      bleDot.className = 'connected';
+      setStatus(`Connected · ${device.name || 'ESP32-EMG'}`, true);
+      btnConnect.textContent = 'Disconnect';
+      btnConnect.disabled = false;
+      btnConnect.onclick = () => device.gatt.disconnect();
+      addLog('BLE connected — EMG streaming active.', 'ok');
+
+    } catch (err) {
+      setStatus(`Error: ${err.message}`, false);
+      btnConnect.disabled = false;
+      addLog(`BLE error: ${err.message}`, 'err');
+    }
+  }
+
+  function setStatus(msg, connected) {
+    bleStatusText.textContent = msg;
+    bleDot.className = connected ? 'connected' : '';
+  }
+
+  btnConnect.onclick = connectBLE;
+
+  // ===========================================================================
+  // WAVEFORM CANVAS
+  // ===========================================================================
+  const waveCanvas = document.getElementById('waveform');
+  const wCtx = waveCanvas.getContext('2d');
+  const WAVE_POINTS = 600;
+  let ch1History = new Array(WAVE_POINTS).fill(2048);
+  let ch2History = new Array(WAVE_POINTS).fill(2048);
+
+  function drawWaveform() {
+    // Match canvas resolution to CSS size
+    waveCanvas.width  = waveCanvas.offsetWidth;
+    waveCanvas.height = waveCanvas.offsetHeight;
+    const W = waveCanvas.width;
+    const H = waveCanvas.height;
+
+    wCtx.clearRect(0, 0, W, H);
+
+    // Grid lines
+    wCtx.strokeStyle = '#1e2530';
+    wCtx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = (H / 4) * i;
+      wCtx.beginPath();
+      wCtx.moveTo(0, y);
+      wCtx.lineTo(W, y);
+      wCtx.stroke();
+    }
+
+    // Push latest sample into history
+    if (emgBuffer.length > 0) {
+      const last = emgBuffer[emgBuffer.length - 1];
+      ch1History.push(last.emg1);
+      ch2History.push(last.emg2);
+      if (ch1History.length > WAVE_POINTS) ch1History.shift();
+      if (ch2History.length > WAVE_POINTS) ch2History.shift();
+    }
+
+    const drawLine = (history, color) => {
+      wCtx.strokeStyle = color;
+      wCtx.lineWidth = 1.5;
+      wCtx.beginPath();
+      history.forEach((v, i) => {
+        const x = (i / (WAVE_POINTS - 1)) * W;
+        const y = H - (v / 4095) * H;
+        i === 0 ? wCtx.moveTo(x, y) : wCtx.lineTo(x, y);
+      });
+      wCtx.stroke();
+    };
+
+    drawLine(ch1History, '#00e5ff');
+    drawLine(ch2History, '#00ff88');
+
+    requestAnimationFrame(drawWaveform);
+  }
+
+  drawWaveform();
+
+  // ===========================================================================
+  // GESTURE DETECTION + AUTO RECORDING
+  // ===========================================================================
+  const GESTURE_NAMES = {
+    0: 'Thumb + Index',
+    1: 'Thumb + Middle',
+    2: 'Thumb + Ring',
+    3: 'Rest / No Gesture',
+  };
+
+  const gestureValueEl = document.getElementById('gesture-value');
+  const gestureNameEl  = document.getElementById('gesture-name');
+  const recBadge       = document.getElementById('rec-badge');
+  const recFlash       = document.getElementById('rec-flash');
+
+  let gestureHoldCount  = 0;
+  let lastHeldGesture   = -1;
+  let isRecording       = false;
+  let inCooldown        = false;
+  let totalFilesSaved   = 0;
+
+  // Per-gesture file counters
+  const fileCounters = { 0: 0, 1: 0, 2: 0, 3: 0 };
+
+  function addLog(msg, type = '') {
+    const log = document.getElementById('log');
+    const el  = document.createElement('div');
+    el.className = type ? `log-${type}` : '';
+    el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function saveCSV(gestureId, samples) {
+    fileCounters[gestureId]++;
+    const idx      = String(fileCounters[gestureId]).padStart(3, '0');
+    const filename = `gesture_${gestureId}_${idx}.csv`;
+
+    const rows = ['timestamp_ms,emg1,emg2'];
+    const t0   = samples[0].ts;
+    for (const s of samples) {
+      rows.push(`${s.ts - t0},${s.emg1},${s.emg2}`);
+    }
+
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    totalFilesSaved++;
+    document.getElementById('stat-files').textContent   = totalFilesSaved;
+    document.getElementById('stat-last').textContent    = `Gesture ${gestureId}`;
+    document.getElementById('stat-samples').textContent = samples.length;
+
+    addLog(`Saved ${filename} — ${samples.length} samples`, 'ok');
+  }
+
+  async function triggerRecording(gestureId) {
+    if (isRecording || inCooldown || !bleConnected) return;
+    const { windowSec, cooldownSec } = cfg();
+
+    isRecording = true;
+    recBadge.classList.add('active');
+    recFlash.classList.add('active');
+
+    // ── Cyclic pre-trigger snapshot ───────────────────────────────────────────
+    // Gesture just fired — instantly grab everything in the rolling buffer
+    // that falls within the last `windowSec` seconds. No waiting needed.
+    const triggerTs   = Date.now();
+    const cutoffTs    = triggerTs - (windowSec * 1000);
+    const pre_samples = emgBuffer.filter(s => s.ts >= cutoffTs && s.ts <= triggerTs);
+
+    addLog(`Trigger! Captured ${pre_samples.length} pre-trigger samples (last ${windowSec}s) — Gesture ${gestureId} (${GESTURE_NAMES[gestureId]})`, 'warn');
+
+    // Brief visual flash so user sees the trigger fired (100ms)
+    await new Promise(r => setTimeout(r, 100));
+
+    recBadge.classList.remove('active');
+    recFlash.classList.remove('active');
+    isRecording = false;
+
+    if (pre_samples.length < 10) {
+      addLog(`Skipped — too few samples (${pre_samples.length}). Is BLE streaming?`, 'err');
+    } else {
+      saveCSV(gestureId, pre_samples);
+    }
+
+    // Cooldown — blocks re-trigger for cooldownSec seconds
+    inCooldown = true;
+    addLog(`Cooldown ${cooldownSec}s — next trigger blocked.`, '');
+    await new Promise(r => setTimeout(r, cooldownSec * 1000));
+    inCooldown = false;
+  }
+
+  // ── Main gesture polling loop ──────────────────────────────────────────────
+  function gestureLoop() {
+    const gesture = window.cameraGesture;   // set by camera_test.js (null or 0/1/2)
+    const { minFrames } = cfg();
+
+    // Update UI
+    if (gesture !== null && gesture !== undefined) {
+      gestureValueEl.textContent = `Gesture ${gesture}`;
+      gestureValueEl.className   = 'detected';
+      gestureNameEl.textContent  = GESTURE_NAMES[gesture] || 'Unknown';
+    } else {
+      gestureValueEl.textContent = '–';
+      gestureValueEl.className   = '';
+      gestureNameEl.textContent  = 'No gesture';
+      gestureHoldCount  = 0;
+      lastHeldGesture   = -1;
+    }
+
+    // Accumulate hold frames — must be same gesture consecutively
+    if (gesture !== null && gesture !== undefined) {
+      if (gesture === lastHeldGesture) {
+        gestureHoldCount++;
+      } else {
+        gestureHoldCount = 1;
+        lastHeldGesture  = gesture;
+      }
+
+      // Trigger once hold threshold is reached
+      if (gestureHoldCount === minFrames && !isRecording && !inCooldown) {
+        triggerRecording(gesture);  // async, non-blocking
+      }
+    }
+
+    requestAnimationFrame(gestureLoop);
+  }
+
+  // ── Manual rest-class recording ────────────────────────────────────────────
+  // Press-and-hold for 3s (not a single click) so it isn't triggered by
+  // accident, and so the captured window is genuinely settled/relaxed rather
+  // than mid-movement right after the finger lifts off the button.
+  const btnRest = document.getElementById('btn-rest');
+  const REST_HOLD_MS = 3000;
+  let restHoldTimer = null;
+  let restHoldStart = null;
+
+  function restHoldTick() {
+    const elapsed = Date.now() - restHoldStart;
+    if (elapsed >= REST_HOLD_MS) {
+      btnRest.textContent = 'Record Rest (3s hold)';
+      btnRest.style.color = 'var(--yellow)';
+      btnRest.style.borderColor = 'var(--yellow)';
+      if (!isRecording && !inCooldown && bleConnected) {
+        triggerRecording(3);
+      } else if (!bleConnected) {
+        addLog('Rest capture skipped — BLE not connected.', 'err');
+      } else {
+        addLog('Rest capture skipped — recorder busy (recording/cooldown).', 'warn');
+      }
+      return;
+    }
+    const remaining = ((REST_HOLD_MS - elapsed) / 1000).toFixed(1);
+    btnRest.textContent = `Hold… ${remaining}s`;
+    restHoldTimer = requestAnimationFrame(restHoldTick);
+  }
+
+  function startRestHold() {
+    if (isRecording || inCooldown) return;
+    restHoldStart = Date.now();
+    btnRest.style.color = '#000';
+    btnRest.style.background = 'var(--yellow)';
+    restHoldTimer = requestAnimationFrame(restHoldTick);
+  }
+
+  function cancelRestHold() {
+    if (restHoldTimer) cancelAnimationFrame(restHoldTimer);
+    restHoldTimer = null;
+    btnRest.textContent = 'Record Rest (3s hold)';
+    btnRest.style.color = 'var(--yellow)';
+    btnRest.style.background = 'transparent';
+    btnRest.style.borderColor = 'var(--yellow)';
+  }
+
+  btnRest.addEventListener('pointerdown', startRestHold);
+  btnRest.addEventListener('pointerup', cancelRestHold);
+  btnRest.addEventListener('pointerleave', cancelRestHold);
+  btnRest.addEventListener('pointercancel', cancelRestHold);
+
+  window.addEventListener('DOMContentLoaded', () => {
+    requestAnimationFrame(gestureLoop);
+  });
+  </script>
+
+</body>
+</html>
